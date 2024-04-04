@@ -1,0 +1,32 @@
+variables: 
+  KUBE_CONTEXT: learn_gitlab01/k8s-connection:k8s-connection
+stages:
+  - build
+  - deploy 
+
+build:
+ image: docker
+ stage: build
+ services: 
+   - docker:dind
+ script:
+   - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+   - docker build -t $CI_REGISTRY/myrepo001/nginximage:v1 .
+   - echo "Image Built"
+   - docker push $CI_REGISTRY/myrepo001/nginximage:v1
+   - echo "Image Pushed to ACR"
+
+deploy: 
+  stage: deploy
+  image: 
+    name: bitnami/kubectl:latest
+    entrypoint: ['']
+  script:
+    - kubectl config get-contexts
+    - kubectl config use-context $KUBE_CONTEXT
+    - cd k8s-src
+    - kubectl apply -f sample.yml 
+    - kubectl apply -f svc.yml
+    - sleep 20
+    - kubectl get pods -o wide
+    - kubectl get service -o wide

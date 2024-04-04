@@ -1,0 +1,73 @@
+variables:
+  KUBE_CONTEXT: learn_gitlab01/k8s-connection:k8s-connection
+
+stages:
+  - pre-build
+  - build
+  - publish
+  - deploy
+  # - destroy
+
+#This Stage will create a package from Helm Chart that can push on package registry.
+Extract-Data:
+  stage: pre-build
+  image: python
+  script:
+    - echo PACKAGE_VERSION=$(python3 $CI_PROJECT_DIR/package-name.py) >> build.env
+    - echo PACKAGE_NAME=$(python3 $CI_PROJECT_DIR/chart-name.py) >> build.env
+
+  artifacts:
+    reports:
+      dotenv: build.env
+
+build:
+  image: docker
+  stage: build
+  services: 
+    - docker:dind
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t $CI_REGISTRY/sample:v1 .
+    - echo "Image Built"
+    - docker push $CI_REGISTRY/sample:v1
+    - echo "Image Pushed to ACR"
+
+publish-helm-package: 
+  stage: publish
+  image: 
+    name: alpine/helm:latest
+    entrypoint: ['']
+  before_script:
+  - apk add --update docker
+  script:
+    - echo "Build Started"
+    - echo ${CI_PROJECT_ID}
+    - echo $PACKAGE_NAME
+    - echo $PACKAGE_VERSION
+    - export HELM_EXPERIMENTAL_OCI=1
+    - cd $PACKAGE_NAME
+    - helm package .
+    - helm registry login $CI_REGISTRY -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD
+    - helm push /builds/learn_gitlab01/k8s-data/$PACKAGE_NAME/$PACKAGE_VERSION oci://$CI_REGISTRY/helm
+   # - 'curl --request POST --user gitlab-ci-token:$CI_REGISTRY_PASSWORD --form "chart=@${PACKAGE_VERSION}" "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/helm/api/stable/charts"'
+    - echo "Chart Package Published to Gitlab package registry"
+  
+   
+Deploy-Helm-Chart:
+  stage: deploy
+  image: 
+    name: dtzar/helm-kubectl
+    entrypoint: ['']
+  script:
+    - kubectl config get-contexts
+    - kubectl config use-context $KUBE_CONTEXT
+    - helm registry login $CI_REGISTRY -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD
+    #- helm repo add --username $CI_USERNAME --password $CI_PASSWORD acrrepo https://$CI_REGISTRY/helm/v1/repo
+    # - helm repo update 
+    # - helm repo list
+    - helm upgrade --install $PACKAGE_NAME $PACKAGE_NAME/
+    - sleep 20
+    - kubectl get pods -o wide
+    - kubectl get svc -o wide
+
+    
